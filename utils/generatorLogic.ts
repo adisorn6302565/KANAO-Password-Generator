@@ -20,33 +20,45 @@ const CHARSET = {
   symbol: '!@#$%^&*()_+~`|}{[]:;?><,./-='
 };
 
+/** Unbiased random integer in [0, max) using rejection sampling (plain `% max` favours low values). */
+export const randomInt = (max: number): number => {
+  const limit = Math.floor(0x100000000 / max) * max;
+  const buf = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(buf);
+  } while (buf[0] >= limit);
+  return buf[0] % max;
+};
+
+const stripAmbiguous = (chars: string, avoid: boolean) =>
+  avoid ? [...chars].filter(c => !AMBIGUOUS_CHARS.includes(c)).join('') : chars;
+
+export const getPasswordPools = (options: PasswordOptions): string[] =>
+  [
+    options.uppercase && CHARSET.upper,
+    options.lowercase && CHARSET.lower,
+    options.numbers && CHARSET.number,
+    options.symbols && CHARSET.symbol,
+  ]
+    .filter((p): p is string => Boolean(p))
+    .map(p => stripAmbiguous(p, options.avoidAmbiguous))
+    .filter(p => p.length > 0);
+
 export const generatePassword = (options: PasswordOptions): string => {
-  let charPool = '';
-  
-  if (options.uppercase) charPool += CHARSET.upper;
-  if (options.lowercase) charPool += CHARSET.lower;
-  if (options.numbers) charPool += CHARSET.number;
-  if (options.symbols) charPool += CHARSET.symbol;
+  const pools = getPasswordPools(options);
+  if (pools.length === 0 || options.length <= 0) return '';
+  const all = pools.join('');
 
-  if (options.avoidAmbiguous) {
-    // Escape special regex characters for the split
-    const escapedAmbiguous = AMBIGUOUS_CHARS.map(c => c.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
-    const regex = new RegExp(`[${escapedAmbiguous.join('')}]`, 'g');
-    charPool = charPool.replace(regex, '');
+  // one character from every selected class, the rest from the combined pool
+  const chars = pools.slice(0, options.length).map(p => p[randomInt(p.length)]);
+  while (chars.length < options.length) chars.push(all[randomInt(all.length)]);
+
+  // Fisher-Yates shuffle so the guaranteed characters are not always at the start
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
   }
-
-  if (charPool.length === 0) return '';
-
-  const cryptoObj = window.crypto;
-  const array = new Uint32Array(options.length);
-  cryptoObj.getRandomValues(array);
-
-  let result = '';
-  for (let i = 0; i < options.length; i++) {
-    result += charPool[array[i] % charPool.length];
-  }
-
-  return result;
+  return chars.join('');
 };
 
 export const generateKey = (length: number, type: 'hex' | 'base64'): string => {
@@ -71,17 +83,14 @@ export const generateKey = (length: number, type: 'hex' | 'base64'): string => {
   }
 };
 
-export const calculateStrength = (password: string): 'อ่อน' | 'ปานกลาง' | 'แข็งแกร่ง' => {
-  let score = 0;
-  if (!password) return 'อ่อน';
-  if (password.length > 8) score += 1;
-  if (password.length > 12) score += 1;
-  if (/[A-Z]/.test(password)) score += 1;
-  if (/[a-z]/.test(password)) score += 1;
-  if (/[0-9]/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
-
-  if (score >= 5) return 'แข็งแกร่ง';
-  if (score >= 3) return 'ปานกลาง';
-  return 'อ่อน';
+/** Entropy in bits of a password produced by this generator with the given options. */
+export const passwordEntropyBits = (options: PasswordOptions): number => {
+  const size = getPasswordPools(options).join('').length;
+  return size > 1 ? options.length * Math.log2(size) : 0;
 };
+
+export type Strength = 'อ่อน' | 'ปานกลาง' | 'แข็งแกร่ง';
+
+/** < 50 bits weak, < 80 bits medium, otherwise strong. */
+export const calculateStrength = (bits: number): Strength =>
+  bits >= 80 ? 'แข็งแกร่ง' : bits >= 50 ? 'ปานกลาง' : 'อ่อน';

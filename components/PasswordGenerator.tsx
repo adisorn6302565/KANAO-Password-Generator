@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Copy, RefreshCw, Check, Settings, Key, Lock } from 'lucide-react';
-import { generatePassword, generateKey, calculateStrength, GeneratorMode, PasswordOptions } from '../utils/generatorLogic';
+import { generatePassword, generateKey, calculateStrength, passwordEntropyBits, GeneratorMode, PasswordOptions } from '../utils/generatorLogic';
 
 export const PasswordGenerator: React.FC = () => {
   const [mode, setMode] = useState<GeneratorMode>('password');
@@ -64,7 +64,8 @@ export const PasswordGenerator: React.FC = () => {
     });
   };
 
-  const strength = mode === 'password' ? calculateStrength(result) : 'แข็งแกร่ง';
+  const entropyBits = mode === 'password' ? passwordEntropyBits(options) : options.length * 8;
+  const strength = calculateStrength(entropyBits);
   const strengthColor = 
     strength === 'อ่อน' ? 'bg-red-500' : 
     strength === 'ปานกลาง' ? 'bg-yellow-500' : 
@@ -135,7 +136,7 @@ export const PasswordGenerator: React.FC = () => {
             <span>ความปลอดภัย:</span>
             <span className="flex items-center gap-1">
                 <span className={`w-2 h-2 rounded-full ${strengthColor}`}></span>
-                {strength}
+                {strength} · {Math.round(entropyBits)} bits
             </span>
           </div>
         )}
